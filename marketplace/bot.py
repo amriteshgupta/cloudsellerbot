@@ -61,7 +61,7 @@ class Access(BaseMiddleware):
         user = event.from_user
         if not user:
             return
-        self.store.register(user.id, user.username)
+        self.store.register(user.id, user.username, user.full_name)
         u = self.store.one('SELECT banned FROM users WHERE id=?', (user.id,))
         if u['banned'] and user.id not in self.store.admins:
             if isinstance(event, CallbackQuery):
@@ -366,6 +366,10 @@ async def background(bot,store):
                 await asyncio.sleep(0.5)
                 continue
             body=job['body']
+            if job['kind']=='review':
+                product=store.product(job['product_id'])
+                if product:
+                    body=store.review_text(product)
             try:
                 await bot.send_message(job['chat_id'],body,reply_markup=keyboard(json.loads(job['buttons'])))
             except TelegramRetryAfter as exc:

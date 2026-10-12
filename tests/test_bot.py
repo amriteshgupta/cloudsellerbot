@@ -94,7 +94,9 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(p['negotiable'],1)
         self.assertEqual(p['delivery'],'24')
         self.assertEqual(p['status'],'pending')
+        self.db.register(2,'monsto','Monsto')
         await self.message(1,'/review 1')
+        self.assertIn('Seller username: @monsto',self.session.sent[-1].text)
         button=self.session.sent[-1].reply_markup.inline_keyboard[0][0]
         self.assertEqual(button.callback_data,'approve:1-1')
         await self.callback(1,button.callback_data)

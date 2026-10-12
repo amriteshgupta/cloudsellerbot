@@ -7,7 +7,7 @@ from .policy import buyer_cents, money, validate_text
 
 SCHEMA = '''
 CREATE TABLE IF NOT EXISTS users (
- id INTEGER PRIMARY KEY, username TEXT, subscribed INTEGER NOT NULL DEFAULT 0,
+ id INTEGER PRIMARY KEY, username TEXT, display_name TEXT, subscribed INTEGER NOT NULL DEFAULT 0,
  seller INTEGER NOT NULL DEFAULT 0, banned INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS products (
  id INTEGER PRIMARY KEY, seller_id INTEGER NOT NULL REFERENCES users(id),
@@ -66,6 +66,9 @@ class Store:
             columns = {row['name'] for row in c.execute('PRAGMA table_info(products)')}
             if 'negotiable' not in columns:
                 c.execute('ALTER TABLE products ADD COLUMN negotiable INTEGER NOT NULL DEFAULT 0 CHECK(negotiable IN (0,1))')
+            user_columns = {row['name'] for row in c.execute('PRAGMA table_info(users)')}
+            if 'display_name' not in user_columns:
+                c.execute('ALTER TABLE users ADD COLUMN display_name TEXT')
         finally:
             c.close()
 
@@ -108,9 +111,11 @@ class Store:
         if not u or u['banned'] or (seller and not u['seller']):
             raise ValueError('Permission denied. Use /start and /sell; banned users cannot trade.')
 
-    def register(self, uid, username):
+    def register(self, uid, username, display_name=None):
         with self.tx() as c:
-            c.execute('INSERT INTO users(id,username) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET username=excluded.username', (uid, username))
+            c.execute('''INSERT INTO users(id,username,display_name) VALUES (?,?,?)
+                         ON CONFLICT(id) DO UPDATE SET username=excluded.username,display_name=excluded.display_name''',
+                      (uid, username, display_name))
 
     def set_user(self, uid, field, value):
         if field != 'seller':
@@ -142,7 +147,9 @@ class Store:
             f"Negotiable: {negotiable}\nDelivery: {p['delivery']}")
 
     def review_text(self, p):
-        return (f"LISTING #{p['id']} — {p['status']}\nSeller ID: {p['seller_id']}\n" + self.public_text(p) +
+        seller = self.one('SELECT username,display_name FROM users WHERE id=?', (p['seller_id'],))
+        name = f"@{seller['username']}" if seller and seller['username'] else (seller['display_name'] if seller else 'Not set')
+        return (f"LISTING #{p['id']} — {p['status']}\nSeller username: {name or 'Not set'}\nSeller ID: {p['seller_id']}\n" + self.public_text(p) +
                 f"\nSeller unit price: {money(p['seller_price'], self.currency)}\n"
                 f"Resale rights evidence: {p['authorization']}\nReview rights and policy before approving.")
 
@@ -179,7 +186,7 @@ class Store:
                 self.event(c, pid, seller, 'submission', qty)
             p = dict(c.execute('SELECT * FROM products WHERE id=?', (pid,)).fetchone())
             for admin in self.admins:
-                self.enqueue(c, admin, self.review_text(p), [('Review listing', f'review:{pid}')])
+                self.enqueue(c, admin, self.review_text(p), [('Review listing', f'review:{pid}')], 'review', pid)
             self.audit(c, seller, 'submit', 'product', pid)
             return pid
 

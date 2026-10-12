@@ -1,6 +1,6 @@
 -- SQLite schema version 1. Business transitions are implemented in marketplace/db.py.
 CREATE TABLE IF NOT EXISTS users (
- id INTEGER PRIMARY KEY, username TEXT, subscribed INTEGER NOT NULL DEFAULT 0,
+ id INTEGER PRIMARY KEY, username TEXT, display_name TEXT, subscribed INTEGER NOT NULL DEFAULT 0,
  seller INTEGER NOT NULL DEFAULT 0, banned INTEGER NOT NULL DEFAULT 0);
 CREATE TABLE IF NOT EXISTS products (
  id INTEGER PRIMARY KEY, seller_id INTEGER NOT NULL REFERENCES users(id),
