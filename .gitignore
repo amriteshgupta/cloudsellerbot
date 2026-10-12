@@ -1,0 +1,8 @@
+.env
+.venv/
+__pycache__/
+*.pyc
+data/*-wal
+data/*-shm
+*.log
+data/*.lock
