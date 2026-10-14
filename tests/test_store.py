@@ -80,6 +80,15 @@ class StoreTests(unittest.TestCase):
             self.db.contact_admin(3, pid)
         self.db.ban(1, 2, False)
 
+    def test_only_owner_or_admin_can_delete_and_deleted_products_are_hidden(self):
+        pid = self.listing()
+        with self.assertRaises(ValueError):
+            self.db.delete_product(3, pid)
+        self.db.delete_product(2, pid)
+        self.assertEqual(self.db.product(pid)['deleted'], 1)
+        with self.assertRaises(ValueError):
+            self.db.contact_admin(3, pid)
+
     def test_policy_rejection(self):
         for text in ('live API key', 'OpenAI accounts', 'non-transferable credits',
                      'trial credits', 'sk-' + 'a' * 30, 'AKIA' + 'A' * 16,

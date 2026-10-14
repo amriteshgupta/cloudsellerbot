@@ -119,6 +119,21 @@ class BotTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(self.db.product(pid)['total'],8)
         self.assertEqual(self.db.product(pid)['revision'],2)
 
+    async def test_admin_can_edit_and_delete_any_listing(self):
+        pid=await self.setup_listing()
+        await self.message(1,'/edit')
+        buttons=self.session.sent[-1].reply_markup.inline_keyboard
+        self.assertEqual(buttons[0][0].callback_data,f'edit:{pid}')
+        await self.callback(1,f'edit:{pid}')
+        for value in ('Admin updated','9','600.00','YES','72'):
+            await self.message(1,value)
+        updated=self.db.product(pid)
+        self.assertEqual(updated['seller_id'],2)
+        self.assertEqual(updated['status'],'pending')
+        self.assertEqual(updated['total'],9)
+        await self.callback(1,f'delete:{pid}')
+        self.assertEqual(self.db.product(pid)['deleted'],1)
+
     async def test_forged_callbacks_and_order_privacy(self):
         pid=await self.setup_listing()
         await self.callback(3,f'approve:{pid}-1')

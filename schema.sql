@@ -12,6 +12,7 @@ CREATE TABLE IF NOT EXISTS products (
  held INTEGER NOT NULL DEFAULT 0 CHECK(held >= 0),
  sold INTEGER NOT NULL DEFAULT 0 CHECK(sold >= 0),
  status TEXT NOT NULL CHECK(status IN ('pending','approved','changes','rejected','paused')),
+ deleted INTEGER NOT NULL DEFAULT 0 CHECK(deleted IN (0,1)),
  reason TEXT NOT NULL DEFAULT '', revision INTEGER NOT NULL DEFAULT 1, created INTEGER NOT NULL,
  CHECK(total >= held + sold));
 CREATE TABLE IF NOT EXISTS orders (

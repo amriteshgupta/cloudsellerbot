@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS products (
  held INTEGER NOT NULL DEFAULT 0 CHECK(held >= 0),
  sold INTEGER NOT NULL DEFAULT 0 CHECK(sold >= 0),
  status TEXT NOT NULL CHECK(status IN ('pending','approved','changes','rejected','paused')),
+ deleted INTEGER NOT NULL DEFAULT 0 CHECK(deleted IN (0,1)),
  reason TEXT NOT NULL DEFAULT '', revision INTEGER NOT NULL DEFAULT 1, created INTEGER NOT NULL,
  CHECK(total >= held + sold));
 CREATE TABLE IF NOT EXISTS orders (
@@ -66,6 +67,8 @@ class Store:
             columns = {row['name'] for row in c.execute('PRAGMA table_info(products)')}
             if 'negotiable' not in columns:
                 c.execute('ALTER TABLE products ADD COLUMN negotiable INTEGER NOT NULL DEFAULT 0 CHECK(negotiable IN (0,1))')
+            if 'deleted' not in columns:
+                c.execute('ALTER TABLE products ADD COLUMN deleted INTEGER NOT NULL DEFAULT 0 CHECK(deleted IN (0,1))')
             user_columns = {row['name'] for row in c.execute('PRAGMA table_info(users)')}
             if 'display_name' not in user_columns:
                 c.execute('ALTER TABLE users ADD COLUMN display_name TEXT')
@@ -153,7 +156,7 @@ class Store:
                 f"\nSeller unit price: {money(p['seller_price'], self.currency)}\n"
                 f"Resale rights evidence: {p['authorization']}\nReview rights and policy before approving.")
 
-    def submit(self, seller, data, edit_id=None):
+    def submit(self, seller, data, edit_id=None, actor=None):
         fields = ('name','category','description','authorization','delivery','validity')
         limits = {'name': (3,100), 'category': (2,60), 'description': (10,1000),
                   'authorization': (10,800), 'delivery': (1,150), 'validity': (1,150)}
@@ -169,11 +172,16 @@ class Store:
         if not isinstance(price, int) or not 1 <= price <= 100_000_000 or not isinstance(qty, int) or not 1 <= qty <= 10000:
             raise ValueError('Invalid price or quantity.')
         with self.tx() as c:
-            self.active(c, seller, seller=True)
+            editor = seller if actor is None else actor
+            if editor in self.admins and edit_id:
+                if not c.execute('SELECT 1 FROM users WHERE id=?', (seller,)).fetchone():
+                    raise ValueError('Seller not found.')
+            else:
+                self.active(c, seller, seller=True)
             values = tuple(data[f] for f in fields) + (price, buyer_cents(price), qty, int(negotiable))
             if edit_id:
                 p = c.execute('SELECT * FROM products WHERE id=?', (edit_id,)).fetchone()
-                if not p or p['seller_id'] != seller or p['status'] not in ('pending','changes','rejected','approved','paused'):
+                if not p or p['seller_id'] != seller or p['deleted'] or p['status'] not in ('pending','changes','rejected','approved','paused'):
                     raise ValueError('Only your submitted listings can be edited.')
                 if qty < p['held'] + p['sold']:
                     raise ValueError('Quantity cannot be lower than held plus sold stock.')
@@ -189,6 +197,19 @@ class Store:
                 self.enqueue(c, admin, self.review_text(p), [('Review listing', f'review:{pid}')], 'review', pid)
             self.audit(c, seller, 'submit', 'product', pid)
             return pid
+
+    def delete_product(self, actor, pid):
+        with self.tx() as c:
+            p = c.execute('SELECT * FROM products WHERE id=?', (pid,)).fetchone()
+            if not p or p['deleted']:
+                raise ValueError('Listing not found.')
+            if actor not in self.admins:
+                self.active(c, actor, seller=True)
+                if p['seller_id'] != actor:
+                    raise ValueError('You can delete only your own listings.')
+            c.execute('UPDATE products SET deleted=1,status="paused",reason="Deleted" WHERE id=?', (pid,))
+            self.audit(c, actor, 'delete', 'product', pid)
+            self.enqueue(c, p['seller_id'], f'Listing #{pid} was deleted.')
 
     def contact_admin(self, buyer, pid):
         with self.tx() as c:
@@ -214,7 +235,7 @@ class Store:
         with self.tx() as c:
             p = c.execute('SELECT * FROM products WHERE id=?', (pid,)).fetchone()
             before, after = targets[action]
-            if not p or p['status'] != before or (expected_revision is not None and p['revision'] != expected_revision):
+            if not p or p['deleted'] or p['status'] != before or (expected_revision is not None and p['revision'] != expected_revision):
                 raise ValueError('Listing status changed. Refresh /admin.')
             if after == 'approved':
                 self.active(c, p['seller_id'], seller=True)

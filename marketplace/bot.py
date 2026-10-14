@@ -144,11 +144,15 @@ def build_router(store, cfg):
             store.set_user(m.from_user.id,'seller',True)
         if edit_id:
             p=store.product(edit_id)
-            if not p or p['seller_id']!=m.from_user.id or p['status'] not in ('pending','changes','rejected','approved','paused'):
-                raise ValueError('Only your submitted listings can be edited.')
+            if (not p or p['deleted'] or p['status'] not in ('pending','changes','rejected','approved','paused') or
+                    p['seller_id'] != m.from_user.id and m.from_user.id not in store.admins):
+                raise ValueError('You can edit only your own listings unless you are an admin.')
+            owner_id=p['seller_id']
+        else:
+            owner_id=m.from_user.id
         await state.clear()
         await state.set_state(Submission.entry)
-        await state.update_data(index=0, product={}, edit_id=edit_id)
+        await state.update_data(index=0, product={}, edit_id=edit_id, owner_id=owner_id)
         await m.answer('Enter each field in a separate message. /cancel discards this form.\n' + FIELDS[0][1])
 
     @router.message(Command('sell'))
@@ -159,12 +163,21 @@ def build_router(store, cfg):
     async def edit(m: Message,state: FSMContext):
         parts=m.text.split()
         if len(parts)==1:
-            rows=store.rows('SELECT id,name,status FROM products WHERE seller_id=? ORDER BY id DESC',(m.from_user.id,))
+            if m.from_user.id in store.admins:
+                rows=store.rows('''SELECT p.id,p.name,p.status,u.username FROM products p
+                                   JOIN users u ON u.id=p.seller_id WHERE p.deleted=0 ORDER BY p.id DESC''')
+            else:
+                rows=store.rows('''SELECT id,name,status,NULL AS username FROM products
+                                   WHERE seller_id=? AND deleted=0 ORDER BY id DESC''',(m.from_user.id,))
             if not rows:
                 await m.answer('You have no products. Use /sell to create one.')
                 return
-            await m.answer('Choose a product to edit:', reply_markup=keyboard([
-                (f'Edit #{p["id"]} {p["name"]}', f'edit:{p["id"]}') for p in rows]))
+            buttons=[]
+            for p in rows:
+                owner=f' (@{p["username"]})' if p['username'] else ''
+                buttons.append((f'Edit #{p["id"]} {p["name"]}{owner}', f'edit:{p["id"]}'))
+                buttons.append((f'Delete #{p["id"]} {p["name"]}', f'delete:{p["id"]}'))
+            await m.answer('Choose a product to edit or delete:', reply_markup=keyboard(buttons))
             return
         if len(parts)!=2:
             raise ValueError('Usage: /edit PRODUCT_ID')
@@ -175,7 +188,7 @@ def build_router(store, cfg):
         if len(m.text.split())!=1:
             raise ValueError('Use /buy to see the available product list.')
         rows=store.rows('''SELECT p.* FROM products p JOIN users u ON u.id=p.seller_id
-              WHERE p.status='approved' AND u.banned=0 AND p.total-p.held-p.sold>0 ORDER BY p.id DESC''')
+              WHERE p.status='approved' AND p.deleted=0 AND u.banned=0 AND p.total-p.held-p.sold>0 ORDER BY p.id DESC''')
         if not rows:
             await m.answer('There are no approved products currently available.')
             return
@@ -200,7 +213,7 @@ def build_router(store, cfg):
 
     async def review(m,pid):
         p=store.product(pid)
-        if not p:
+        if not p or p['deleted']:
             raise ValueError('Listing missing.')
         buttons=[]
         if p['status']=='pending':
@@ -223,7 +236,7 @@ def build_router(store, cfg):
         page=int(parts[1]) if len(parts)==2 else 0
         if page<0:
             raise ValueError('Page must be >= 0.')
-        rows=store.rows('SELECT id,name FROM products WHERE status="pending" ORDER BY id LIMIT 10 OFFSET ?',(page*10,))
+        rows=store.rows('SELECT id,name FROM products WHERE status="pending" AND deleted=0 ORDER BY id LIMIT 10 OFFSET ?',(page*10,))
         for p in rows:
             await m.answer(f"Listing #{p['id']} {p['name']}",reply_markup=keyboard([('Review',f'review:{p["id"]}')]))
         await m.answer(f'Page {page}. {command} {page+1} for more.' if rows else 'Nothing on this page.')
@@ -276,6 +289,10 @@ def build_router(store, cfg):
             await q.answer()
             message=q.message.model_copy(update={'from_user':q.from_user})
             await begin_form(message,state,int(value))
+            return
+        if action=='delete':
+            store.delete_product(uid,int(value))
+            await q.answer('Listing deleted.')
             return
         if action=='approve':
             pid, revision = value.split('-')
@@ -343,7 +360,7 @@ def build_router(store, cfg):
                 'validity':'Not specified',
                 'delivery':str(product['delivery']),
             })
-            pid=store.submit(m.from_user.id,product,data.get('edit_id'))
+            pid=store.submit(data['owner_id'],product,data.get('edit_id'),actor=m.from_user.id)
             await state.clear()
             await m.answer(f'Listing #{pid} submitted for admin approval. It will appear in /buy after approval.')
             return

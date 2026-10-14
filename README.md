@@ -35,7 +35,7 @@ Defaults: USD, 10% markup, 10 messages/second globally. `BROADCAST_PER_SECOND` a
 - `/sell` asks for product name, quantity, seller asking price, negotiability, and delivery time in hours.
 - Every new or edited listing stays pending until an admin reviews and approves it. `/changes ID reason` and `/reject ID reason` notify the seller.
 - `/buy` shows a numbered list of approved products with available stock, buyer price, negotiability, and delivery time. A buyer's number selection notifies the configured admin for manual follow-up.
-- `/edit` shows the seller's products and opens the same five-field form. Editing an approved product sends it back for fresh approval; quantity cannot go below held plus sold stock.
+- `/edit` shows the seller's products with Edit and Delete buttons. Admins see every product and can edit or delete any listing. Editing an approved product sends it back for fresh approval; quantity cannot go below held plus sold stock. Deleted products are hidden from buyers and can no longer be edited.
 - Buyer prices are seller asking price × 1.10, rounded half up to cents. No payment, reservation, delivery, refund, or payout is processed by the bot.
 - `/ban USER_ID` blocks trading and pauses approved listings owned by that user. `/unban` restores access; admins resume listings individually after review.
 
@@ -46,7 +46,7 @@ Defaults: USD, 10% markup, 10 messages/second globally. `BROADCAST_PER_SECOND` a
 | `/start`, `/help` | Show the short usage guide |
 | `/sell` | Submit a product for admin approval |
 | `/buy` | Show approved products and contact the admin |
-| `/edit` | Choose one of your products to update |
+| `/edit` | Edit or delete products; admins see every product |
 | `/cancel` | Stop the current seller form |
 
 | Admin | Purpose |
